@@ -12,7 +12,7 @@ Prerequisites
 
 Building the Project
 ---------------------------------------------------------------------
-Clone the repository and follow these steps from your terminal in the project's root directory to generate and build the solution with CMake:
+Clone the repository and follow these steps from your terminal in the project's root directory to generate and build the solution using CMake:
 
 1. Generate the project files
 ```shell
