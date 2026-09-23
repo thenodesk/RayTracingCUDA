@@ -1,6 +1,6 @@
 Ray Tracing using CUDA
 =====================================================================
-I'm using this project to learn more about how a ray tracing algorithm works, but also using CUDA to both accelerate image generation and understand how to adapt C++ code to a CUDA environment.
+I'm using this project to learn more about how ray tracing works, but also using CUDA to both accelerate rendering and understand how to port C++ code to CUDA.
 
 It is based on Peter Shirley's [Ray Tracing in One Weekend](https://raytracing.github.io/) book series and [NVIDIA's blog post](https://developer.nvidia.com/blog/accelerated-ray-tracing-cuda/).
 
@@ -12,7 +12,7 @@ Prerequisites
 
 Building the Project
 ---------------------------------------------------------------------
-Clone the repository and follow these steps from your terminal in the project's root directory to generate and build the solution:
+Clone the repository and follow these steps from your terminal in the project's root directory to generate and build the solution with CMake:
 
 1. Generate the project files
 ```shell
@@ -22,5 +22,6 @@ cmake -B build
 ```shell
 cmake --build build --config Release
 ```
-Executable will be in `build/Release` folder.
+The executable will be in `build/Release` folder.
 
+_This project was tested with Visual Studio on Windows._
