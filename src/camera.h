@@ -2,11 +2,15 @@
 
 #include "hittable.h"
 #include "material.h"
+#include "assets.h"
 
 struct camera_props
 {
     float aspect_ratio = 16.0f / 9.0f;
     int img_width = 1280;
+    int img_height = img_width;
+    int samples_per_pixel = 50;
+
     int channels = 3;
     int depth = 10;
     float vfov = 60.0f;
@@ -22,7 +26,7 @@ struct camera_props
 class camera
 {
 public:
-    __device__ void initialize()
+    void initialize()
     {
         img_height = int(props.img_width / props.aspect_ratio);
         img_height = (img_height < 1) ? 1 : img_height;
@@ -58,6 +62,8 @@ public:
         defocus_disk_v = v * defocus_radius;
     }
 
+    inline int get_image_height() const { return img_height; }
+
     __device__ ray get_ray(float u, float v, curandState* local_rand_state)
     {
         vec3 pixel_sample = pixel00_loc + (u * pixel_delta_u) + (v * pixel_delta_v);
@@ -74,7 +80,7 @@ public:
         return center + (p[0] * defocus_disk_u) + (p[1] * defocus_disk_v);
     }
 
-    __device__ color ray_color(const ray& r, hittable** world, curandState* local_rand_state) const
+    __device__ color ray_color(const ray& r, DeviceScene& d_scene, curandState* local_rand_state) const
     {
         ray cur_ray = r;
         color cur_attenuation = color(1.0f, 1.0f, 1.0f);
@@ -85,9 +91,9 @@ public:
         for (int i = 0; i < props.depth; i++)
         {
             hit_record rec;
-            if ((*world)->hit(cur_ray, interval(0.001f, INFINITY), rec))
+            if (d_scene.world.hit(cur_ray, interval(0.001f, INFINITY), rec))
             {
-                if (rec.mat->scatter(cur_ray, rec, attenuation, scattered, local_rand_state))
+                if (d_scene.materials[rec.mat_idx].scatter(cur_ray, rec, attenuation, scattered, local_rand_state))
                 {
                     cur_attenuation *= attenuation;
                     cur_ray = scattered;

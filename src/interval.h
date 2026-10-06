@@ -29,12 +29,15 @@ public:
         return x;
     }
 
+    __host__ __device__ static const interval empty() {
+        return interval(+INFINITY, -INFINITY);
+    }
+
+    __host__ __device__ static const interval universe() {
+        return interval(-INFINITY, +INFINITY);
+    }
 
 public:
     float min, max;
-
-    static const interval empty, universe;
 };
 
-const interval interval::empty = interval(+INFINITY, -INFINITY);
-const interval interval::universe = interval(-INFINITY, +INFINITY);

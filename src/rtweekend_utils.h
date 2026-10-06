@@ -12,7 +12,7 @@
 
 // Utility Functions
 
-void check_cuda(cudaError_t result, const char* const func, const char* const file, const int line)
+inline void check_cuda(cudaError_t result, const char* const func, const char* const file, const int line)
 {
 	if (result)
 	{
@@ -24,8 +24,18 @@ void check_cuda(cudaError_t result, const char* const func, const char* const fi
 	}
 }
 
-__device__ inline float degrees_to_radians(float degrees) {
+__host__ __device__ inline float degrees_to_radians(float degrees) {
 	return degrees * PI / 180.0f;
+}
+
+inline float random_float() {
+	// Returns a random real in [0,1).
+	return std::rand() / (RAND_MAX + 1.0f);
+}
+//
+inline float random_float(float min, float max) {
+	// Returns a random real in [min,max).
+	return min + (max - min) * random_float();
 }
 
 #include "vec3.h"

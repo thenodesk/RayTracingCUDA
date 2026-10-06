@@ -2,23 +2,12 @@
 
 #include "hittable.h"
 
-class material
+class lambertian
 {
 public:
-    __device__ virtual ~material() = default;
+    lambertian(const color& albedo) : albedo(albedo) {}
 
-    __device__ virtual bool scatter(const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered, curandState* local_rand_state) const
-    {
-        return false;
-    }
-};
-
-class lambertian : public material
-{
-public:
-    __device__ lambertian(const color& albedo) : albedo(albedo) {}
-
-    __device__ bool scatter(const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered, curandState* local_rand_state) const override
+    __device__ bool scatter(const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered, curandState* local_rand_state) const
     {
         vec3 scatter_direction = rec.normal + random_unit_vector(local_rand_state);
 
@@ -34,12 +23,12 @@ private:
     color albedo;
 };
 
-class metal : public material
+class metal
 {
 public:
-    __device__ metal(const color& albedo, float fuzz) : albedo(albedo), fuzz(fuzz < 1.0f ? fuzz : 1.0f) {}
+    metal(const color& albedo, float fuzz) : albedo(albedo), fuzz(fuzz < 1.0f ? fuzz : 1.0f) {}
 
-    __device__ bool scatter(const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered, curandState* local_rand_state) const override
+    __device__ bool scatter(const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered, curandState* local_rand_state) const
     {
         vec3 reflected = reflect(r_in.direction(), rec.normal);
         reflected = unit_vector(reflected) + (fuzz * random_unit_vector(local_rand_state));
@@ -53,12 +42,12 @@ private:
     float fuzz;
 };
 
-class dielectric : public material
+class dielectric
 {
 public:
-    __device__ dielectric(float refraction_index) : refraction_index(refraction_index) {}
+    dielectric(float refraction_index) : refraction_index(refraction_index) {}
 
-    __device__ bool scatter(const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered, curandState* local_rand_state) const override
+    __device__ bool scatter(const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered, curandState* local_rand_state) const
     {
         attenuation = color(1.0f, 1.0f, 1.0f);
         float ri = rec.front_face ? (1.0f / refraction_index) : refraction_index;
@@ -84,9 +73,39 @@ private:
     {
         float r0 = (1.0f - refraction_index) / (1.0f + refraction_index);
         r0 = r0 * r0;
-        return r0 + (1.0f - r0) * pow((1.0f - cosine), 5);
+        float m = 1.0f - cosine;
+        return r0 + (1.0f - r0) * (m * m * m * m * m);
     }
 
 private:
     float refraction_index;
+};
+
+enum MaterialType { MAT_LAMBERTIAN, MAT_METAL, MAT_DIELECTRIC };
+
+struct MaterialData {
+    MaterialType type;
+
+    union {
+        lambertian mat_diffuse;
+        metal mat_metal;
+        dielectric mat_glass;
+    };
+
+    MaterialData(const lambertian& mat) : type(MAT_LAMBERTIAN), mat_diffuse(mat) {}
+    MaterialData(const metal& mat) : type(MAT_METAL), mat_metal(mat) {}
+    MaterialData(const dielectric& mat) : type(MAT_DIELECTRIC), mat_glass(mat) {}
+
+    __device__ bool scatter(const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered, curandState* local_rand_state) const
+    {
+        switch (type) {
+        case MAT_LAMBERTIAN:
+            return mat_diffuse.scatter(r_in, rec, attenuation, scattered, local_rand_state);
+        case MAT_METAL:
+            return mat_metal.scatter(r_in, rec, attenuation, scattered, local_rand_state);
+        case MAT_DIELECTRIC:
+            return mat_glass.scatter(r_in, rec, attenuation, scattered, local_rand_state);
+        }
+        return false;
+    }
 };

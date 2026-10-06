@@ -4,15 +4,7 @@
 
 using color = vec3;
 
-__host__ __device__ inline float linear_to_gamma(float linear_component)
-{
-	if (linear_component > 0.0f)
-		return sqrt(linear_component);
-
-	return 0.0f;
-}
-
-void write_color(unsigned char* out, vec3* fb, int x, int y, int stride, int channels = 3)
+inline void write_color(unsigned char* out, vec3* fb, int x, int y, int stride, int channels = 3)
 {
 	int index = (y * stride + x);
 

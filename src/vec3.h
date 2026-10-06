@@ -69,6 +69,16 @@ public:
                     min + curand_uniform(local_rand_state) * (max - min));
     }
 
+    static vec3 random()
+    {
+        return vec3(random_float(), random_float(), random_float());
+    }
+
+    static vec3 random(float min, float max)
+    {
+        return vec3(random_float(min, max), random_float(min, max), random_float(min, max));
+    }
+
 public:
     float e[3];
 };
