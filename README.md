@@ -2,7 +2,7 @@ Ray Tracing using CUDA
 =====================================================================
 I'm using this project to learn more about how ray tracing works, but also using CUDA to both accelerate rendering and understand how to port C++ code to CUDA.
 
-It is based on Peter Shirley's [Ray Tracing in One Weekend](https://raytracing.github.io/) book series and [NVIDIA's blog post](https://developer.nvidia.com/blog/accelerated-ray-tracing-cuda/).
+It is based on Peter Shirley's [Ray Tracing in One Weekend Series](https://raytracing.github.io/) and [NVIDIA's blog post](https://developer.nvidia.com/blog/accelerated-ray-tracing-cuda/).
 
 Each book is implemented in a separate Git branch, allowing each stage of the series to be explored independently.
 
