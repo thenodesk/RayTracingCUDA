@@ -1,6 +1,9 @@
 #pragma once
 
-#include "hittable.h"
+#include "rtweekend_utils.h"
+
+#include "rtw_image.h"
+#include "sphere.h"
 #include "material.h"
 #include "assets.h"
 
@@ -13,6 +16,7 @@ struct camera_props
 
     int channels = 3;
     int depth = 10;
+    color background;
     float vfov = 60.0f;
 
     point3 lookfrom = point3(0.0f, 0.0f, 0.0f);
@@ -26,7 +30,7 @@ struct camera_props
 class camera
 {
 public:
-    void initialize()
+    __host__ __device__ void initialize()
     {
         img_height = int(props.img_width / props.aspect_ratio);
         img_height = (img_height < 1) ? 1 : img_height;
@@ -70,8 +74,9 @@ public:
         
         point3 ray_origin = (props.defocus_angle <= 0) ? center : defocus_disk_sample(local_rand_state);
         vec3 ray_direction = pixel_sample - ray_origin;
+        float ray_time = curand_uniform(local_rand_state);
 
-        return ray(ray_origin, ray_direction);
+        return ray(ray_origin, ray_direction, ray_time);
     }
 
     __device__ point3 defocus_disk_sample(curandState* local_rand_state) const {
@@ -91,24 +96,22 @@ public:
         for (int i = 0; i < props.depth; i++)
         {
             hit_record rec;
-            if (d_scene.world.hit(cur_ray, interval(0.001f, INFINITY), rec))
+            if (d_scene.world.hit(cur_ray, interval(0.001f, INFINITY), rec, local_rand_state))
             {
-                if (d_scene.materials[rec.mat_idx].scatter(cur_ray, rec, attenuation, scattered, local_rand_state))
+                if (d_scene.materials[rec.mat_idx].scatter(cur_ray, rec, attenuation, scattered, d_scene, local_rand_state))
                 {
                     cur_attenuation *= attenuation;
                     cur_ray = scattered;
                 }
                 else
                 {
-                    return color(0.0f, 0.0f, 0.0f);
+                    color color_from_emission = d_scene.materials[rec.mat_idx].emitted(rec.u, rec.v, rec.p, d_scene);
+                    return cur_attenuation * color_from_emission;
                 }
             }
             else
             {
-                vec3 unit_direction = unit_vector(cur_ray.direction());
-                float t = 0.5f * (unit_direction.y() + 1.0f);
-                color c = (1.0f - t) * color(1.0f, 1.0f, 1.0f) + t * color(0.5f, 0.7f, 1.0f);
-                return cur_attenuation * c;
+                return cur_attenuation * props.background;
             }
 
         }

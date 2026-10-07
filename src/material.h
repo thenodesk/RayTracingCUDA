@@ -1,55 +1,53 @@
 #pragma once
 
 #include "hittable.h"
+#include "texture.h"
+#include "assets.h"
 
 class lambertian
 {
 public:
-    lambertian(const color& albedo) : albedo(albedo) {}
+    __host__ __device__ lambertian() {}
 
-    __device__ bool scatter(const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered, curandState* local_rand_state) const
+    __device__ bool scatter(const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered, DeviceScene& d_scene, int tex_id, curandState* local_rand_state) const
     {
         vec3 scatter_direction = rec.normal + random_unit_vector(local_rand_state);
 
         if (scatter_direction.near_zero())
             scatter_direction = rec.normal;
 
-        scattered = ray(rec.p, scatter_direction);
-        attenuation = albedo;
+        scattered = ray(rec.p, scatter_direction, r_in.time());
+        attenuation = d_scene.textures[tex_id].value(rec.u, rec.v, rec.p, &d_scene);
         return true;
     }
-
-private:
-    color albedo;
 };
 
 class metal
 {
 public:
-    metal(const color& albedo, float fuzz) : albedo(albedo), fuzz(fuzz < 1.0f ? fuzz : 1.0f) {}
+    __host__ __device__ metal(float fuzz) : fuzz(fuzz < 1.0f ? fuzz : 1.0f) {}
 
-    __device__ bool scatter(const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered, curandState* local_rand_state) const
+    __device__ bool scatter(const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered, DeviceScene& d_scene, int tex_id, curandState* local_rand_state) const
     {
         vec3 reflected = reflect(r_in.direction(), rec.normal);
         reflected = unit_vector(reflected) + (fuzz * random_unit_vector(local_rand_state));
-        scattered = ray(rec.p, reflected);
-        attenuation = albedo;
+        scattered = ray(rec.p, reflected, r_in.time());
+        attenuation = d_scene.textures[tex_id].value(rec.u, rec.v, rec.p, &d_scene);
         return dot(scattered.direction(), rec.normal) > 0.0f;
     }
 
 private:
-    color albedo;
     float fuzz;
 };
 
 class dielectric
 {
 public:
-    dielectric(float refraction_index) : refraction_index(refraction_index) {}
+    __host__ __device__ dielectric(float refraction_index) : refraction_index(refraction_index) {}
 
-    __device__ bool scatter(const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered, curandState* local_rand_state) const
+    __device__ bool scatter(const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered, DeviceScene& d_scene, int tex_id, curandState* local_rand_state) const
     {
-        attenuation = color(1.0f, 1.0f, 1.0f);
+        attenuation = tex_id == -1 ? color(1.0f, 1.0f, 1.0f) : d_scene.textures[tex_id].value(rec.u, rec.v, rec.p, &d_scene);
         float ri = rec.front_face ? (1.0f / refraction_index) : refraction_index;
 
         vec3 unit_direction = unit_vector(r_in.direction());
@@ -64,7 +62,7 @@ public:
         else
             direction = refract(unit_direction, rec.normal, ri);
 
-        scattered = ray(rec.p, direction);
+        scattered = ray(rec.p, direction, r_in.time());
         return true;
     }
 
@@ -81,31 +79,71 @@ private:
     float refraction_index;
 };
 
-enum MaterialType { MAT_LAMBERTIAN, MAT_METAL, MAT_DIELECTRIC };
+class diffuse_light
+{
+public:
+    diffuse_light() {}
+
+    __device__ color emitted(float u, float v, const point3& p, DeviceScene& d_scene, int tex_id) const
+    {
+        return d_scene.textures[tex_id].value(u, v, p, &d_scene);
+    }
+};
+
+class isotropic
+{
+public:
+    isotropic() {}
+
+    __device__ bool scatter(const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered, DeviceScene& d_scene, int tex_id, curandState* local_rand_state) const
+    {
+        scattered = ray(rec.p, random_unit_vector(local_rand_state), r_in.time());
+        attenuation = d_scene.textures[tex_id].value(rec.u, rec.v, rec.p, &d_scene);
+        return true;
+    }
+};
+
+enum MaterialType { MAT_LAMBERTIAN, MAT_METAL, MAT_DIELECTRIC, MAT_DIFFUSE_LIGHT, MAT_ISOTROPIC };
 
 struct MaterialData {
     MaterialType type;
+    int texture_id;
 
     union {
         lambertian mat_diffuse;
         metal mat_metal;
         dielectric mat_glass;
+        diffuse_light mat_diffuse_light;
+        isotropic mat_isotropic;
     };
 
-    MaterialData(const lambertian& mat) : type(MAT_LAMBERTIAN), mat_diffuse(mat) {}
-    MaterialData(const metal& mat) : type(MAT_METAL), mat_metal(mat) {}
-    MaterialData(const dielectric& mat) : type(MAT_DIELECTRIC), mat_glass(mat) {}
+    MaterialData(const lambertian& mat, int tex_id) : type(MAT_LAMBERTIAN), mat_diffuse(mat), texture_id(tex_id) {}
+    MaterialData(const metal& mat, int tex_id) : type(MAT_METAL), mat_metal(mat), texture_id(tex_id) {}
+    MaterialData(const dielectric& mat, int tex_id = -1) : type(MAT_DIELECTRIC), mat_glass(mat), texture_id(tex_id) {}
+    MaterialData(const diffuse_light& mat, int tex_id) : type(MAT_DIFFUSE_LIGHT), mat_diffuse_light(mat), texture_id(tex_id) {}
+    MaterialData(const isotropic& mat, int tex_id) : type(MAT_ISOTROPIC), mat_isotropic(mat), texture_id(tex_id) {}
 
-    __device__ bool scatter(const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered, curandState* local_rand_state) const
+    __device__ bool scatter(const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered, DeviceScene& d_scene, curandState* local_rand_state) const
     {
         switch (type) {
         case MAT_LAMBERTIAN:
-            return mat_diffuse.scatter(r_in, rec, attenuation, scattered, local_rand_state);
+            return mat_diffuse.scatter(r_in, rec, attenuation, scattered, d_scene, texture_id, local_rand_state);
         case MAT_METAL:
-            return mat_metal.scatter(r_in, rec, attenuation, scattered, local_rand_state);
+            return mat_metal.scatter(r_in, rec, attenuation, scattered, d_scene, texture_id, local_rand_state);
         case MAT_DIELECTRIC:
-            return mat_glass.scatter(r_in, rec, attenuation, scattered, local_rand_state);
+            return mat_glass.scatter(r_in, rec, attenuation, scattered, d_scene, texture_id, local_rand_state);
+        case MAT_ISOTROPIC:
+            return mat_isotropic.scatter(r_in, rec, attenuation, scattered, d_scene, texture_id, local_rand_state);
         }
         return false;
+    }
+
+    __device__ color emitted(float u, float v, const point3& p, DeviceScene& d_scene) const
+    {
+        switch (type) {
+        case MAT_DIFFUSE_LIGHT:
+            return mat_diffuse_light.emitted(u, v, p, d_scene, texture_id);
+        }
+        return color(0.0f, 0.0f, 0.0f);
     }
 };

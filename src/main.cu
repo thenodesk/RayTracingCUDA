@@ -4,11 +4,17 @@
 #include "sphere.h"
 #include "camera.h"
 #include "material.h"
+#include "bvh.h"
+#include "texture.h"
 #include "scenes.h"
 
 #include "external/stb_image_write.h"
 
 #include <time.h>
+#include <vector>
+
+// Samples per kernel launch. Small launches avoids Windows driver timeout (TDR).
+static const int SAMPLES_PER_LAUNCH = 20;
 
 __global__ void render_init(int max_x, int max_y, curandState* rand_state)
 {
@@ -19,7 +25,6 @@ __global__ void render_init(int max_x, int max_y, curandState* rand_state)
 
 	int pixel_index = j * max_x + i;
 
-	//Each thread gets same seed, a different sequence number, no offset
 	curand_init(1996 + pixel_index, 0, 0, &rand_state[pixel_index]);
 }
 
@@ -75,15 +80,34 @@ void create_world_cpu(DeviceScene& d_scene, camera_props& cam_props)
 {
 	HostScene h_scene;
 
-	create_scene(h_scene, cam_props);
+	create_scene9(h_scene, cam_props);
+
+	d_scene.images_count = h_scene.images.size();
+	if (d_scene.images_count > 0)
+	{
+		d_scene.images_addr = (unsigned char**)malloc(h_scene.images.size() * sizeof(unsigned char*));
+		memcpy(d_scene.images_addr, h_scene.images.data(), h_scene.images.size() * sizeof(unsigned char*));
+	}
 
 	init_scene_gpu(d_scene, h_scene, cam_props);
 }
 
 void free_world(vec3* fb, curandState* d_rand_state, DeviceScene& d_scene)
 {
+	for (int i = 0; i < d_scene.images_count; i++)
+		checkCudaErrors(cudaFree(d_scene.images_addr[i]));
+
+	free(d_scene.images_addr);
+
+	checkCudaErrors(cudaFree(d_scene.texture_types.solid));
+	checkCudaErrors(cudaFree(d_scene.texture_types.checker));
+	checkCudaErrors(cudaFree(d_scene.texture_types.image));
+	checkCudaErrors(cudaFree(d_scene.texture_types.noise));
+	checkCudaErrors(cudaFree(d_scene.world.bvh_nodes));
+	checkCudaErrors(cudaFree(d_scene.world.instances));
 	checkCudaErrors(cudaFree(d_scene.world.objects));
 	checkCudaErrors(cudaFree(d_scene.materials));
+	checkCudaErrors(cudaFree(d_scene.textures));
 	checkCudaErrors(cudaFree(d_scene.camera));
 	checkCudaErrors(cudaFree(d_rand_state));
 	checkCudaErrors(cudaFree(fb));
@@ -124,20 +148,24 @@ int main()
 	checkCudaErrors(cudaGetLastError());
 	checkCudaErrors(cudaDeviceSynchronize());
 
-	std::cout << "Rendering scene... (Dimensions: " << cam_props.img_width << "x" << cam_props.img_height
-		<< " | Samples per pixel: " << cam_props.samples_per_pixel << " | Max. ray bounces: " << cam_props.depth << ")\n";
+	std::cout << "Rendering scene... (Dimensions: " << cam_props.img_width << "x" << cam_props.img_height 
+		      << " | Samples per pixel: " << cam_props.samples_per_pixel << " | Max. ray bounces: " << cam_props.depth << ")\n";
+	for (int done = 0; done < cam_props.samples_per_pixel; done += SAMPLES_PER_LAUNCH)
+	{
+		int batch = std::min(SAMPLES_PER_LAUNCH, cam_props.samples_per_pixel - done);
 
-	render<<<blocks, threads>>>(fb, cam_props.img_width, cam_props.img_height, cam_props.samples_per_pixel, d_scene, d_rand_state);
-	checkCudaErrors(cudaGetLastError());
-	checkCudaErrors(cudaDeviceSynchronize());
+		render<<<blocks, threads>>>(fb, cam_props.img_width, cam_props.img_height, batch, d_scene, d_rand_state);
+		checkCudaErrors(cudaGetLastError());
+		checkCudaErrors(cudaDeviceSynchronize());
+	}
 
-	finalize_image << <blocks, threads >> > (fb, cam_props.img_width, cam_props.img_height, cam_props.samples_per_pixel);
+	finalize_image<<<blocks, threads>>>(fb, cam_props.img_width, cam_props.img_height, cam_props.samples_per_pixel);
 	checkCudaErrors(cudaGetLastError());
 	checkCudaErrors(cudaDeviceSynchronize());
 
 	stop = clock();
 	double timer_seconds = ((double)(stop - start)) / CLOCKS_PER_SEC;
-	std::cout << "\nRender time: " << timer_seconds << " seconds.\n";
+	std::cout << "\nRender time: " << timer_seconds << " seconds.\n\n";
 
 	// Output FB as Image
 	unsigned char* host_fb = new unsigned char[num_pixels * cam_props.channels];

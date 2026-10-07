@@ -1,7 +1,5 @@
 #pragma once
 
-#include "rtweekend_utils.h"
-
 class vec3
 {
 public:
@@ -150,7 +148,7 @@ __device__ inline vec3 random_in_unit_disk(curandState* local_rand_state) {
     }
 }
 
-__device__ vec3 random_unit_vector(curandState* local_rand_state)
+__device__ inline vec3 random_unit_vector(curandState* local_rand_state)
 {
     while (true) {
         vec3 p = 2.0f * vec3(curand_uniform(local_rand_state), curand_uniform(local_rand_state), curand_uniform(local_rand_state)) - vec3(1.0f, 1.0f, 1.0f);
@@ -160,7 +158,7 @@ __device__ vec3 random_unit_vector(curandState* local_rand_state)
     }
 }
 
-__device__ vec3 random_on_hemisphere(const vec3& normal, curandState* local_rand_state)
+__device__ vec3 inline random_on_hemisphere(const vec3& normal, curandState* local_rand_state)
 {
     vec3 on_unit_sphere = random_unit_vector(local_rand_state);
     if (dot(on_unit_sphere, normal) > 0.0f) // In the same hemisphere as the normal
