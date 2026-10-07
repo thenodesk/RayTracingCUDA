@@ -4,11 +4,6 @@
 #include "sphere.h"
 
 class camera;
-class solid_color;
-class checker_texture;
-class image_texture;
-class noise_texture;
-class rtw_image;
 
 struct MaterialData;
 struct TextureData;
