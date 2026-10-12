@@ -167,9 +167,22 @@ __device__ vec3 inline random_on_hemisphere(const vec3& normal, curandState* loc
         return -on_unit_sphere;
 }
 
+__device__ inline vec3 random_cosine_direction(curandState* local_rand_state)
+{
+    float r1 = curand_uniform(local_rand_state);
+    float r2 = curand_uniform(local_rand_state);
+
+    float phi = 2.0f * PI * r1;
+    float x = cos(phi) * sqrt(r2);
+    float y = sin(phi) * sqrt(r2);
+    float z = sqrtf(1.0f - r2);
+
+    return vec3(x, y, z);
+}
+
 __device__ inline vec3 reflect(const vec3& v, const vec3& n)
 {
-    return v - 2 * dot(v, n) * n;
+    return v - 2.0f * dot(v, n) * n;
 }
 
 __device__ inline vec3 refract(const vec3& uv, const vec3& n, float etai_over_etat) 

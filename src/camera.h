@@ -4,6 +4,7 @@
 
 #include "rtw_image.h"
 #include "sphere.h"
+#include "pdf.h"
 #include "material.h"
 #include "assets.h"
 
@@ -30,7 +31,7 @@ struct camera_props
 class camera
 {
 public:
-    __host__ __device__ void initialize()
+    __host__ void initialize()
     {
         img_height = int(props.img_width / props.aspect_ratio);
         img_height = (img_height < 1) ? 1 : img_height;
@@ -92,6 +93,7 @@ public:
 
         ray scattered;
         color attenuation;
+        float pdf_value;
 
         for (int i = 0; i < props.depth; i++)
         {
@@ -100,12 +102,17 @@ public:
             {
                 if (d_scene.materials[rec.mat_idx].scatter(cur_ray, rec, attenuation, scattered, d_scene, local_rand_state))
                 {
-                    cur_attenuation *= attenuation;
+                    hittable_pdf light_pdf(d_scene.world.objects, d_scene.world.lights, d_scene.world.lights_count, rec.p);
+                    d_scene.materials[rec.mat_idx].apply_material_to_pdf(light_pdf, cur_ray, rec, scattered, pdf_value, local_rand_state);
+
+                    float scattering_pdf = d_scene.materials[rec.mat_idx].scattering_pdf(cur_ray, rec, scattered);
+
+                    cur_attenuation = attenuation * scattering_pdf * cur_attenuation / pdf_value;
                     cur_ray = scattered;
                 }
                 else
                 {
-                    color color_from_emission = d_scene.materials[rec.mat_idx].emitted(rec.u, rec.v, rec.p, d_scene);
+                    color color_from_emission = d_scene.materials[rec.mat_idx].emitted(cur_ray, rec, rec.u, rec.v, rec.p, d_scene);
                     return cur_attenuation * color_from_emission;
                 }
             }
@@ -121,14 +128,16 @@ public:
 
 public:
     camera_props props;
+    int sqrt_spp;          // Square root of number of samples per pixel
+    float recip_sqrt_spp;  // 1 / sqrt_spp
 
 private:
-    int    img_height;     // Rendered image height
-    point3 center;         // Camera center
-    point3 pixel00_loc;    // Location of pixel 0, 0
-    vec3   pixel_delta_u;  // Offset to pixel to the right
-    vec3   pixel_delta_v;  // Offset to pixel below
-    vec3   v, u, w;        // Camera frame basis vectors
-    vec3   defocus_disk_u; // Defocus disk horizontal radius
-    vec3   defocus_disk_v; // Defocus disk vertical radius
+    int    img_height;          // Rendered image height
+    point3 center;              // Camera center
+    point3 pixel00_loc;         // Location of pixel 0, 0
+    vec3   pixel_delta_u;       // Offset to pixel to the right
+    vec3   pixel_delta_v;       // Offset to pixel below
+    vec3   v, u, w;             // Camera frame basis vectors
+    vec3   defocus_disk_u;      // Defocus disk horizontal radius
+    vec3   defocus_disk_v;      // Defocus disk vertical radius
 };

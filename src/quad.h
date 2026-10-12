@@ -5,15 +5,35 @@
 class quad
 {
 public:
-	quad(const point3& Q, const vec3& u, const vec3& v, bool child = false)
-		: Q(Q), u(u), v(v), child(child)
+	quad(const point3& Q, const vec3& u, const vec3& v, bool light = false, bool child = false)
+		: Q(Q), u(u), v(v), child(child), light(light)
 	{
 		vec3 n = cross(u, v);
 		normal = unit_vector(n);
 		D = dot(normal, Q);
 		w = n / n.length_squared();
 
+		area = n.length();
+
 		set_bounding_box();
+	}
+
+	__device__ float pdf_value(const point3& origin, const vec3& direction, int mat_id) const
+	{
+		hit_record rec;
+		if (!this->hit(ray(origin, direction), interval(0.001f, INFINITY), rec, mat_id))
+			return 0.0f;
+
+		float distance_squared = rec.t * rec.t * direction.length_squared();
+		float cosine = fabsf(dot(direction, rec.normal) / direction.length());
+
+		return distance_squared / (cosine * area);
+	}
+
+	__device__ vec3 random(const point3& origin, curandState* local_rand_state) const
+	{
+		point3 p = Q + (curand_uniform(local_rand_state) * u) + (curand_uniform(local_rand_state) * v);
+		return p - origin;
 	}
 
 	void set_bounding_box()
@@ -152,8 +172,11 @@ private:
 	vec3 translation{};
 	float cos_theta_y = 1.0f, sin_theta_y = 0.0f;
 	float D;
+	float area;
 
 	bool child = false;
+	bool light = false;
+
 };
 
 class box

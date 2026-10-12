@@ -28,26 +28,27 @@ __global__ void render_init(int max_x, int max_y, curandState* rand_state)
 	curand_init(1996 + pixel_index, 0, 0, &rand_state[pixel_index]);
 }
 
-__global__ void render(vec3* fb, int max_x, int max_y, int num_samples, DeviceScene d_scene, curandState* rand_state)
+__global__ void render(vec3* fb, int max_x, int max_y, int sqrt_spp, float recip_sqrt_spp, int n_begin, int n_end, DeviceScene d_scene, curandState* rand_state)
 {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	int j = blockIdx.y * blockDim.y + threadIdx.y;
 
 	if (i >= max_x || j >= max_y) return;
 
-	camera* cam = d_scene.camera;
-
 	int pixel_index = (j * max_x + i);
 
 	curandState local_rand_state = rand_state[pixel_index];
 	vec3 col(0.0f, 0.0f, 0.0f);
-	for (int s = 0; s < num_samples; s++)
+	for (int n = n_begin; n < n_end; n++)
 	{
-		float u = float(i + (curand_uniform(&local_rand_state) - 0.5f));
-		float v = float(j + (curand_uniform(&local_rand_state) - 0.5f));
+		int s_i = n % sqrt_spp;
+		int s_j = n / sqrt_spp;
 
-		ray r = cam->get_ray(u, v, &local_rand_state);
-		color c = cam->ray_color(r, d_scene, &local_rand_state);
+		float u = i + ((s_i + curand_uniform(&local_rand_state)) * recip_sqrt_spp - 0.5f);
+		float v = j + ((s_j + curand_uniform(&local_rand_state)) * recip_sqrt_spp - 0.5f);
+
+		ray r = d_scene.camera->get_ray(u, v, &local_rand_state);
+		color c = d_scene.camera->ray_color(r, d_scene, &local_rand_state);
 
 		if (isfinite(c.x()) && isfinite(c.y()) && isfinite(c.z()))
 			col += c;
@@ -57,7 +58,7 @@ __global__ void render(vec3* fb, int max_x, int max_y, int num_samples, DeviceSc
 	fb[pixel_index] += col;
 }
 
-__global__ void finalize_image(vec3* fb, int max_x, int max_y, int total_samples)
+__global__ void finalize_image(vec3* fb, int max_x, int max_y, float recip_total_samples, DeviceScene d_scene)
 {
 	int i = blockIdx.x * blockDim.x + threadIdx.x;
 	int j = blockIdx.y * blockDim.y + threadIdx.y;
@@ -66,7 +67,7 @@ __global__ void finalize_image(vec3* fb, int max_x, int max_y, int total_samples
 
 	int pixel_index = (j * max_x + i);
 
-	vec3 col = fb[pixel_index] / float(total_samples);
+	vec3 col = fb[pixel_index] * recip_total_samples;
 
 	// Apply linear to gamma
 	col[0] = sqrt(col[0]);
@@ -80,7 +81,7 @@ void create_world_cpu(DeviceScene& d_scene, camera_props& cam_props)
 {
 	HostScene h_scene;
 
-	create_scene9(h_scene, cam_props);
+	create_scene1(h_scene, cam_props);
 
 	d_scene.images_count = h_scene.images.size();
 	if (d_scene.images_count > 0)
@@ -103,6 +104,7 @@ void free_world(vec3* fb, curandState* d_rand_state, DeviceScene& d_scene)
 	checkCudaErrors(cudaFree(d_scene.texture_types.checker));
 	checkCudaErrors(cudaFree(d_scene.texture_types.image));
 	checkCudaErrors(cudaFree(d_scene.texture_types.noise));
+	checkCudaErrors(cudaFree(d_scene.world.lights));
 	checkCudaErrors(cudaFree(d_scene.world.bvh_nodes));
 	checkCudaErrors(cudaFree(d_scene.world.instances));
 	checkCudaErrors(cudaFree(d_scene.world.objects));
@@ -150,16 +152,21 @@ int main()
 
 	std::cout << "Rendering scene... (Dimensions: " << cam_props.img_width << "x" << cam_props.img_height 
 		      << " | Samples per pixel: " << cam_props.samples_per_pixel << " | Max. ray bounces: " << cam_props.depth << ")\n";
-	for (int done = 0; done < cam_props.samples_per_pixel; done += SAMPLES_PER_LAUNCH)
-	{
-		int batch = std::min(SAMPLES_PER_LAUNCH, cam_props.samples_per_pixel - done);
 
-		render<<<blocks, threads>>>(fb, cam_props.img_width, cam_props.img_height, batch, d_scene, d_rand_state);
+	int sqrt_spp = int(std::sqrtf(cam_props.samples_per_pixel));
+	int total_samples = sqrt_spp * sqrt_spp;
+	float recip_sqrt_spp = 1.0f / sqrt_spp;
+	float recip_total_samples = 1.0f / total_samples;
+	for (int done = 0; done < total_samples; done += SAMPLES_PER_LAUNCH)
+	{
+		int n_end = std::min(done + SAMPLES_PER_LAUNCH, total_samples);
+
+		render<<<blocks, threads>>>(fb, cam_props.img_width, cam_props.img_height, sqrt_spp, recip_sqrt_spp, done, n_end, d_scene, d_rand_state);
 		checkCudaErrors(cudaGetLastError());
 		checkCudaErrors(cudaDeviceSynchronize());
 	}
 
-	finalize_image<<<blocks, threads>>>(fb, cam_props.img_width, cam_props.img_height, cam_props.samples_per_pixel);
+	finalize_image<<<blocks, threads>>>(fb, cam_props.img_width, cam_props.img_height, recip_total_samples, d_scene);
 	checkCudaErrors(cudaGetLastError());
 	checkCudaErrors(cudaDeviceSynchronize());
 

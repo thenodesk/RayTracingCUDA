@@ -41,6 +41,30 @@ struct HittableObject {
         return false;
     }
 
+    __device__ float pdf_value(const point3& origin, const vec3& direction, curandState* local_rand_state) const
+    {
+        switch (type)
+        {
+        case HIT_SPHERE:
+            return sphere_obj.pdf_value(origin, direction, local_rand_state);
+        case HIT_QUAD:
+            return quad_obj.pdf_value(origin, direction, material_id);
+        }
+        return 0.0f;
+    }
+
+    __device__ vec3 random(const point3& origin, curandState* local_rand_state) const
+    {
+        switch (type)
+        {
+        case HIT_SPHERE:
+            return sphere_obj.random(origin, local_rand_state);
+        case HIT_QUAD:
+            return quad_obj.random(origin, local_rand_state);
+        }
+        return vec3(0.0f, 0.0f, 0.0f);
+    }
+
     __host__ __device__ aabb bounding_box() const
     {
         switch (type) {
@@ -134,24 +158,9 @@ struct HittableList {
     HittableObject* objects;
     HittableInstance* instances;
     BVHNode* bvh_nodes;
+    int* lights;
+    int lights_count;
     int bvh_count;
-
-    // O método hit da lista que percorre o array contíguo sequencialmente
-    //__device__ bool hit(const ray& r, interval ray_t, hit_record& rec) const {
-    //    hit_record temp_rec;
-    //    bool hit_anything = false;
-    //    float closest_so_far = ray_t.max;
-
-    //    // Como 'objects' é contíguo, o cache da GPU adora esse loop linear!
-    //    for (int i = 0; i < count; i++) {
-    //        if (objects[i].hit(r, interval(ray_t.min, closest_so_far), temp_rec)) {
-    //            hit_anything = true;
-    //            closest_so_far = temp_rec.t;
-    //            rec = temp_rec;
-    //        }
-    //    }
-    //    return hit_anything;
-    //}
 
     __device__ bool hit(const ray& r, interval ray_t, hit_record& rec, curandState* local_rand_state) const
     {

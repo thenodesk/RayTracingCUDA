@@ -1,6 +1,7 @@
 #pragma once
 
 #include "hittable.h"
+#include "onb.h"
 
 class sphere
 {
@@ -124,7 +125,43 @@ public:
 
     __host__ __device__ aabb bounding_box() const { return bbox; }
 
+    __device__ float pdf_value(const point3& origin, const vec3& direction, curandState* local_rand_state) const
+    {
+        // This method only works for stationary spheres.
+
+        hit_record rec;
+        if (!this->hit(ray(origin, direction), interval(0.001f, INFINITY), rec, 0, local_rand_state))
+            return 0.0f;
+
+        float dist_squared = (center.at(0.0f) - origin).length_squared();
+        float cos_theta_max = sqrtf(1.0f - radius * radius / dist_squared);
+        float solid_angle = 2.0f * PI * (1.0f - cos_theta_max);
+
+        return  1.0f / solid_angle;
+    }
+
+    __device__ vec3 random(const point3& origin, curandState* local_rand_state) const
+    {
+        vec3 direction = center.at(0.0f) - origin;
+        float distance_squared = direction.length_squared();
+        onb uvw(direction);
+        return uvw.transform(random_to_sphere(radius, distance_squared, local_rand_state));
+    }
+
 private:
+    __device__ static vec3 random_to_sphere(float radius, float distance_squared, curandState* local_rand_state)
+    {
+        float r1 = curand_uniform(local_rand_state);
+        float r2 = curand_uniform(local_rand_state);
+        float z = 1.0f + r2 * (sqrtf(1.0f - radius * radius / distance_squared) - 1.0f);
+
+        float phi = 2.0f * PI * r1;
+        float x = cosf(phi) * sqrtf(1.0f - z * z);
+        float y = sinf(phi) * sqrtf(1.0f - z * z);
+
+        return vec3(x, y, z);
+    }
+
     __host__ __device__ inline vec3 world_to_object_space(const vec3& v) const
     {
         if (cos_theta_y == 1.0f && sin_theta_y == 0.0f) return v;
@@ -151,7 +188,7 @@ private:
     {
         vec3 rvec(radius, radius, radius);
         point3 c0 = object_to_world_space(center.at(0.0f)) + translation;
-        point3 c1 = object_to_world_space(center.at(1.0f)) + translation;   // = c0 se estacionária
+        point3 c1 = object_to_world_space(center.at(1.0f)) + translation;
         bbox = aabb(aabb(c0 - rvec, c0 + rvec), aabb(c1 - rvec, c1 + rvec));
     }
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "hittable.h"
+#include "pdf.h"
 #include "texture.h"
 #include "assets.h"
 
@@ -11,14 +12,14 @@ public:
 
     __device__ bool scatter(const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered, DeviceScene& d_scene, int tex_id, curandState* local_rand_state) const
     {
-        vec3 scatter_direction = rec.normal + random_unit_vector(local_rand_state);
-
-        if (scatter_direction.near_zero())
-            scatter_direction = rec.normal;
-
-        scattered = ray(rec.p, scatter_direction, r_in.time());
         attenuation = d_scene.textures[tex_id].value(rec.u, rec.v, rec.p, &d_scene);
         return true;
+    }
+
+    __device__ float scattering_pdf(const ray& r_in, const hit_record& rec, ray& scattered) const
+    {
+        float cos_theta = dot(rec.normal, unit_vector(scattered.direction()));
+        return cos_theta < 0.0f ? 0.0f : cos_theta / PI;
     }
 };
 
@@ -84,8 +85,11 @@ class diffuse_light
 public:
     diffuse_light() {}
 
-    __device__ color emitted(float u, float v, const point3& p, DeviceScene& d_scene, int tex_id) const
+    __device__ color emitted(const ray& r_in, const hit_record& rec, float u, float v, const point3& p, DeviceScene& d_scene, int tex_id) const
     {
+        if (!rec.front_face)
+            return color(0.0f, 0.0f, 0.0f);
+
         return d_scene.textures[tex_id].value(u, v, p, &d_scene);
     }
 };
@@ -97,9 +101,13 @@ public:
 
     __device__ bool scatter(const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered, DeviceScene& d_scene, int tex_id, curandState* local_rand_state) const
     {
-        scattered = ray(rec.p, random_unit_vector(local_rand_state), r_in.time());
         attenuation = d_scene.textures[tex_id].value(rec.u, rec.v, rec.p, &d_scene);
         return true;
+    }
+
+    __device__ float scattering_pdf(const ray& r_in, const hit_record& rec, ray& scattered) const
+    {
+        return 1.0f / (4.0f * PI);
     }
 };
 
@@ -138,12 +146,47 @@ struct MaterialData {
         return false;
     }
 
-    __device__ color emitted(float u, float v, const point3& p, DeviceScene& d_scene) const
+    __device__ color emitted(const ray& r_in, const hit_record& rec, float u, float v, const point3& p, DeviceScene& d_scene) const
     {
         switch (type) {
         case MAT_DIFFUSE_LIGHT:
-            return mat_diffuse_light.emitted(u, v, p, d_scene, texture_id);
+            return mat_diffuse_light.emitted(r_in, rec, u, v, p, d_scene, texture_id);
         }
         return color(0.0f, 0.0f, 0.0f);
+    }
+
+    __device__ float scattering_pdf(const ray& r_in, const hit_record& rec, ray& scattered) const
+    {
+        switch (type) {
+        case MAT_LAMBERTIAN:
+            return mat_diffuse.scattering_pdf(r_in, rec, scattered);
+        case MAT_ISOTROPIC:
+            return mat_isotropic.scattering_pdf(r_in, rec, scattered);
+        }
+        return 1.0f;
+    }
+
+    template <class T>
+    __device__ inline void apply_material_to_pdf(T pdf, const ray& r_in, const hit_record& rec_in, ray& scattered, float& pdf_value, curandState* local_rand_state) const
+    {
+        switch (type)
+        {
+        case MAT_LAMBERTIAN:
+        {
+            mixture_pdf<T, cosine_pdf> mixed_pdf(pdf, cosine_pdf(rec_in.normal));
+            scattered = ray(rec_in.p, mixed_pdf.generate(local_rand_state), r_in.time());
+            pdf_value = mixed_pdf.value(scattered.direction(), local_rand_state);
+            break;
+        }
+        case MAT_ISOTROPIC:
+        {
+            mixture_pdf<T, sphere_pdf> mixed_pdf(pdf, sphere_pdf());
+            scattered = ray(rec_in.p, mixed_pdf.generate(local_rand_state), r_in.time());
+            pdf_value = mixed_pdf.value(scattered.direction(), local_rand_state);
+            break;
+        }
+        default:
+            pdf_value = 1.0f;
+        }
     }
 };

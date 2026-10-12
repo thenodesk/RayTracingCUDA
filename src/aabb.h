@@ -42,14 +42,9 @@ public:
 		for (int axis = 0; axis < 3; axis++)
 		{
 			const interval& ax = axis_interval(axis);
-			//float localMax = ax.size();
-			//float localRayOrig = orig[axis] - ax.min;
 
 			float t0 = (ax.min - orig[axis]) * inv_dir[axis];
 			float t1 = (ax.max - orig[axis]) * inv_dir[axis];
-
-			//float t0 = (/*0.0f*/ - localRayOrig) * inv_dir[axis];
-			//float t1 = (localMax - localRayOrig) * inv_dir[axis];
 
 			if (t0 > t1)
 			{
